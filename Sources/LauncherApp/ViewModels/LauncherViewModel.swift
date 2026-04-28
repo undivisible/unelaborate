@@ -31,6 +31,8 @@ final class LauncherViewModel: ObservableObject {
     @Published var popularMods: [ModrinthProject] = []
     @Published var popularResourcePacks: [ModrinthProject] = []
     @Published var popularShaders: [ModrinthProject] = []
+    @Published var activeDownloads: [String: DownloadProgress] = [:] // slug -> progress
+    @Published var installedModSlugs: Set<String> = [] // Track which mods are installed per instance
 
     private let store = InstanceStore()
     private let modrinth = ModrinthClient()
@@ -474,11 +476,16 @@ final class LauncherViewModel: ObservableObject {
 
     func installCurseForge(mod: CurseForgeMod) async {
         guard let instance = selectedInstance else { return }
+        
+        activeDownloads[mod.slug] = DownloadProgress(projectSlug: mod.slug, progress: 0, status: "Starting...")
+        
         do {
             let files = try await curseForge.files(for: mod.id, gameVersion: instance.mcVersion)
             guard let best = files.first, let url = best.downloadURL else {
                 throw NSError(domain: "CurseForge", code: 404)
             }
+
+            activeDownloads[mod.slug] = DownloadProgress(projectSlug: mod.slug, progress: 0.3, status: "Downloading...")
 
             let expectedSha1 = best.hashes?.first(where: { $0.algo == 1 })?.value
             let resolved = ResolvedInstall(
@@ -497,13 +504,28 @@ final class LauncherViewModel: ObservableObject {
             )
 
             try await installer.install(resolved: [resolved], into: instance)
+            
+            installedModSlugs.insert(mod.slug)
+            activeDownloads[mod.slug] = DownloadProgress(projectSlug: mod.slug, progress: 1.0, status: "Completed")
+            showFeedback("✓ Installed \(mod.name)")
+            
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                activeDownloads.removeValue(forKey: mod.slug)
+            }
         } catch {
+            activeDownloads.removeValue(forKey: mod.slug)
             launchStatus = "Install failed"
+            showFeedback("✗ Install failed")
         }
     }
 
     func install(projectSlug: String, type: ModrinthProjectType) async {
         guard let instance = selectedInstance else { return }
+        
+        // Mark as downloading
+        activeDownloads[projectSlug] = DownloadProgress(projectSlug: projectSlug, progress: 0, status: "Starting...")
+        
         do {
             let resolved = try await resolver.resolve(
                 projectSlug: projectSlug,
@@ -511,18 +533,32 @@ final class LauncherViewModel: ObservableObject {
                 loader: instance.loader,
                 gameVersion: instance.mcVersion
             )
+            
+            // Update progress during download
+            activeDownloads[projectSlug] = DownloadProgress(projectSlug: projectSlug, progress: 0.3, status: "Downloading...")
+            
             try await installer.install(resolved: resolved, into: instance)
-
+            
             if type == .mod {
                 var updated = instance
                 updated.enabledMods.formUnion(resolved.map(\.projectSlug))
                 selectedInstance = updated
                 await saveSelectedInstance()
+                installedModSlugs.insert(projectSlug)
             }
-            showFeedback("Installed \(projectSlug)")
+            
+            activeDownloads[projectSlug] = DownloadProgress(projectSlug: projectSlug, progress: 1.0, status: "Completed")
+            showFeedback("✓ Installed \(resolved.first?.projectSlug ?? projectSlug)")
+            
+            // Clear progress after delay
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                activeDownloads.removeValue(forKey: projectSlug)
+            }
         } catch {
+            activeDownloads.removeValue(forKey: projectSlug)
             launchStatus = "Install failed"
-            showFeedback("Install failed")
+            showFeedback("✗ Install failed")
         }
     }
 
