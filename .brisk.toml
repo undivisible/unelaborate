@@ -1,0 +1,33 @@
+dependencies = []
+
+[package]
+name = "unelaborate"
+version = "0.1.0"
+
+[app]
+bundle_id = "com.example.unelaborate"
+deployment_target = "14"
+sources = "Sources"
+resources = ["Resources"]
+asset_catalogs = []
+frameworks = []
+linker_flags = []
+swift_flags = []
+
+[app.info]
+
+[build]
+architectures = ["arm64"]
+platform = "macos"
+
+[signing]
+identity = "-"
+hardened_runtime = false
+notarize = false
+
+[test]
+sources = "Tests"
+xctest = false
+
+[archive]
+zip = false
