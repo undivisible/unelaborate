@@ -8,13 +8,15 @@ actor InstallQueueService {
         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("unelaborate-install-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
         var linkedFiles: [URL] = []
-
+        
         do {
-            for item in resolved {
+            let total = resolved.count
+            for (idx, item) in resolved.enumerated() {
                 let expected = item.file.hashes["sha1"]
-                let downloaded = try await downloader.download(url: item.file.url, expectedSha1: expected, into: tmp)
-                let cached = try await cache.cacheFile(source: downloaded, type: item.type)
-
+                let downloaded = try await downloader.download(url: item.file.url, expectedSha1: expected, into: tmp) { progress, status in
+                    // Could forward progress to a callback if needed
+                }
+                
                 let destinationDir: URL
                 switch item.type {
                 case .mod: destinationDir = instance.modsDirectory
@@ -22,7 +24,8 @@ actor InstallQueueService {
                 case .shader: destinationDir = instance.shaderDirectory
                 case .modpack: destinationDir = instance.gameDirectory
                 }
-
+                
+                let cached = try await cache.cacheFile(source: downloaded, type: item.type)
                 let linked = try await cache.linkCachedFile(cached, into: destinationDir)
                 linkedFiles.append(linked)
             }
