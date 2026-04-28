@@ -240,52 +240,93 @@ struct ProjectRow: View {
     let project: ModrinthProject
     @ObservedObject var viewModel: LauncherViewModel
     let type: ModrinthProjectType
-    @State private var isInstalling = false
-
+    
     var body: some View {
-        Button {
-            install()
-        } label: {
-            HStack(spacing: 12) {
-                // Icon placeholder (colored by project type)
-                ZStack {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(typeColor.opacity(0.12))
-                        .frame(width: 40, height: 40)
-                    Image(systemName: typeIcon)
-                        .font(.system(size: 18))
-                        .foregroundStyle(typeColor)
+        let isInstalled = viewModel.installedModSlugs.contains(project.slug)
+        let downloadProgress = viewModel.activeDownloads[project.slug]
+        let isDownloading = downloadProgress != nil
+        
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                if !isInstalled && !isDownloading {
+                    install()
                 }
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(project.title)
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.primary)
-                    Text(project.description)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
+            } label: {
+                HStack(spacing: 12) {
+                    // Icon placeholder (colored by project type)
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(typeColor.opacity(0.12))
+                            .frame(width: 40, height: 40)
+                        Image(systemName: typeIcon)
+                            .font(.system(size: 18))
+                            .foregroundStyle(typeColor)
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(project.title)
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.primary)
+                        Text(project.description)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                    
+                    Spacer()
+                    
+                    if isInstalled {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 20))
+                            .foregroundStyle(.green)
+                    } else if isDownloading {
+                        ProgressView(value: Float(downloadProgress?.progress ?? 0))
+                            .progressViewStyle(.linear)
+                            .scaleEffect(0.75)
+                            .frame(width: 20)
+                    } else {
+                        Image(systemName: "plus.circle")
+                            .font(.system(size: 20))
+                            .foregroundStyle(.secondary)
+                    }
                 }
-
-                Spacer()
-
-                if isInstalling {
-                    ProgressView().scaleEffect(0.75)
-                } else {
-                    Image(systemName: "plus.circle")
-                        .font(.system(size: 20))
-                        .foregroundStyle(.secondary)
-                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .disabled(isDownloading)
+            
+            // Progress bar background when downloading
+            if let progress = downloadProgress, progress.progress < 1.0 && progress.progress > 0 {
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(Color.blue.opacity(0.3))
+                    .frame(height: 3)
+                    .padding(.top, 4)
+                    .padding(.horizontal, 12)
+                    .overlay(
+                        GeometryReader { geo in
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(Color.blue)
+                                .frame(width: geo.size.width * CGFloat(progress.progress), height: 3)
+                                .animation(.spring(response: 0.3, dampingFraction: 0.8), value: progress.progress)
+                        }
+                    )
+            }
         }
-        .buttonStyle(.plain)
-        .background(.quinary, in: RoundedRectangle(cornerRadius: 10))
-        .disabled(isInstalling)
+        .background(
+            isInstalled
+                ? Color.green.opacity(0.06)
+                : (isDownloading ? Color.blue.opacity(0.04) : Color.clear)
+        , in: RoundedRectangle(cornerRadius: 10))
     }
-
+    
+    private func install() {
+        Task {
+            await viewModel.install(projectSlug: project.slug, type: type)
+        }
+    }
+    
     private var typeColor: Color {
         switch type {
         case .mod: return .blue
@@ -294,21 +335,13 @@ struct ProjectRow: View {
         case .shader: return .teal
         }
     }
-
+    
     private var typeIcon: String {
         switch type {
         case .mod: return "puzzlepiece.fill"
         case .modpack: return "square.stack.3d.up.fill"
         case .resourcepack: return "photo.fill"
         case .shader: return "sparkles"
-        }
-    }
-
-    private func install() {
-        isInstalling = true
-        Task {
-            await viewModel.install(projectSlug: project.slug, type: type)
-            isInstalling = false
         }
     }
 }
@@ -351,7 +384,7 @@ struct InstalledModsSection: View {
             at: instance.modsDirectory,
             includingPropertiesForKeys: nil
         )) ?? []
-        modFiles = urls.map(\.lastPathComponent)
+        modFiles = urls.map(\.lastPathComponent).filter { !$0.hasSuffix(".disabled") }
     }
 }
 
